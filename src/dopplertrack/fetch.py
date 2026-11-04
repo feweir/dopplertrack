@@ -22,7 +22,7 @@ def release_asset_urls(date: str, pod: str = "planes-readsb-prod-0") -> list[str
     tag = f"v{y}.{m}.{d}-{pod}"
     r = requests.get(API.format(year=y, tag=tag), timeout=60)
     r.raise_for_status()
-    assets = sorted(a for a in r.json()["assets"] if ".tar" in a["name"])
+    assets = [a for a in r.json()["assets"] if ".tar" in a["name"]]
     return [a["browser_download_url"] for a in sorted(assets, key=lambda a: a["name"])]
 
 

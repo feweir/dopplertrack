@@ -25,6 +25,8 @@ dependencies = [
     "requests>=2.34.2",
     "scipy>=1.18.1",
     "soundfile>=0.14.0",
+    "tkinterdnd2>=0.7.0",
+    "tkintermapview>=1.30",
 ]
 
 [project.urls]
@@ -33,6 +35,8 @@ Issues = "https://github.com/mjshiggins/dopplertrack/issues"
 
 [project.scripts]
 dopplertrack = "dopplertrack.cli:main"
+dopplertrack-gui = "dopplertrack.gui:main"
+droplert-gui = "dopplertrack.gui:main"
 
 [build-system]
 requires = ["uv_build>=0.8.3,<0.9.0"]
