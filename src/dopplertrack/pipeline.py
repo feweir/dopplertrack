@@ -85,12 +85,13 @@ def relocate_row(row, segs: list[Segment], dt_s: float):
 def run_search(sp: Spectrogram, ev1: EventFit, ev2: EventFit, traces: list[Trace], grid: Grid,
                harmonics=(1, 1), tol_s=6.0, v_tol=0.35, d_tol=(0.4, 2.5), silence_d_m=6000.0,
                max_range_m=12000.0, c=None, top_pairs=None, progress=True,
-               cpa_cache=None) -> tuple[pd.DataFrame, list[Segment]]:
+               cpa_cache=None, f0_tol=0.05) -> tuple[pd.DataFrame, list[Segment]]:
     """Rank grid points for a two-event recording.
 
     cpa_cache: optional .npz path. The (grid point, flight) CPA table depends only on the grid,
     the traces and max_range, not on the events, and is the slow part; with a path given it is
-    loaded if present and valid for this grid/traces, else computed and saved."""
+    loaded if present and valid for this grid/traces, else computed and saved.
+    f0_tol: relative range swept around each event's fitted f0 when scoring."""
     c = speed_of_sound() if c is None else c
     e0, e1 = grid.enu[:, 0].min() - max_range_m, grid.enu[:, 0].max() + max_range_m
     n0, n1 = grid.enu[:, 1].min() - max_range_m, grid.enu[:, 1].max() + max_range_m
@@ -114,10 +115,11 @@ def run_search(sp: Spectrogram, ev1: EventFit, ev2: EventFit, traces: list[Trace
                             silence_d_m=silence_d_m)
     log(f"{len(pairs)} candidate (point, flight1, flight2) triples after offset + silence filters")
     w1 = EventWindow.from_fit(sp, ev1, harmonics[0]); w2 = EventWindow.from_fit(sp, ev2, harmonics[1])
+    f0_scales = np.arange(1 - f0_tol, 1 + f0_tol + 1e-9, 0.005)
     out = []
     t0 = time.time()
     for k, p in enumerate(pairs.itertuples()):
-        tot, s1, s2, sh = locked_score(w1, w2, segs[p.seg1], segs[p.seg2], grid.enu[p.gidx], float(p.t_heard1), c=c)
+        tot, s1, s2, sh = locked_score(w1, w2, segs[p.seg1], segs[p.seg2], grid.enu[p.gidx], float(p.t_heard1), c=c, f0_scales=f0_scales)
         out.append((p.gidx, grid.lat[p.gidx], grid.lon[p.gidx], p.seg1, p.seg2, segs[p.seg1].icao, segs[p.seg2].icao, p.t_heard1, p.d1, p.v1, p.d2, p.v2, tot, s1, s2, sh))
         if progress and (k + 1) % 500 == 0:
             log(f"scored {k + 1}/{len(pairs)} ({(time.time() - t0) / (k + 1) * 1000:.0f} ms each)")
@@ -149,7 +151,7 @@ def pick_flight(sp: Spectrogram, ev: EventFit, segs: list[Segment], obs_enu, t0_
 
 
 def refine(sp, ev1, ev2, segs, res_row, spacing_m=50.0, half_m=400.0, harmonics=(1, 1), elevation=None, c=None,
-           extra: list[EventFit] | None = None, extra_harmonics: list[int] | None = None):
+           extra: list[EventFit] | None = None, extra_harmonics: list[int] | None = None, f0_tol=0.05):
     """Fine grid around one result row for one flight pair.
 
     extra: further measured events (beyond the two the search used). For each, the flight is
@@ -183,7 +185,8 @@ def refine(sp, ev1, ev2, segs, res_row, spacing_m=50.0, half_m=400.0, harmonics=
     for i in range(len(g)):
         obs = lla_to_enu(g.lat[i], g.lon[i], g.elev[i], res_row.lat0, res_row.lon0)
         d = np.linalg.norm(seg1.enu - obs, axis=1); j = int(np.argmin(d)); t_heard1 = seg1.t[j] + d[j] / c
-        tot, s1, s2, sh = locked_score(w1, w2, seg1, seg2, obs, float(t_heard1), c=c)
+        tot, s1, s2, sh = locked_score(w1, w2, seg1, seg2, obs, float(t_heard1), c=c,
+                                       f0_scales=np.arange(1 - f0_tol, 1 + f0_tol + 1e-9, 0.005))
         t0_map = ev1.t_cpa - float(t_heard1)
         xs = []
         for seg, w in zip(xsegs, xwins):

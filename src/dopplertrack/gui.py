@@ -1,6 +1,7 @@
 """dopplertrack-gui: pick a bounding box on a satellite map, drop a recording, geolocate it."""
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import io
 import queue
@@ -101,11 +102,13 @@ def locate(path, date, bbox, spacing, log):
     grid = Grid.make(la0, la1, lo0, lo1, spacing, elev)
     # the two strongest flyovers (as validated in the README); scores of different event pairs
     # are not comparable, so trying several pairs and keeping the top score picks wrong ones
-    e1, e2 = sorted(evs[:2], key=lambda e: e.t_cpa)
+    # Auto-detected fits are rough (Oyster Bay event 2: 79 m/s and 140 Hz vs 141 m/s and 132 Hz
+    # by hand), and they only seed the search; the real-trajectory score ranks. So score over a
+    # 110 s window centred on the pass, sweep f0 ±15 %, and gate speed, distance and timing loosely.
+    # On Oyster Bay this moves the true point from below a wrong one 78 km away to 30 % above it.
+    e1, e2 = (dataclasses.replace(e, t_start=e.t_cpa - 55, t_end=e.t_cpa + 55) for e in sorted(evs[:2], key=lambda e: e.t_cpa))
     log(f"searching flyovers at {e1.t_cpa:.0f}s and {e2.t_cpa:.0f}s")
-    # auto-detected fits can be far off in speed/distance (Oyster Bay event 2: 79 m/s vs 141 true),
-    # and these only gate candidates; the real-trajectory score ranks them, so gate loosely
-    res, segs = pipeline.run_search(sp, e1, e2, traces, grid, v_tol=0.9, d_tol=(0.25, 4.0), progress=False)
+    res, segs = pipeline.run_search(sp, e1, e2, traces, grid, v_tol=0.9, d_tol=(0.25, 4.0), tol_s=15, f0_tol=0.15, progress=False)
     if not len(res):
         raise RuntimeError("no flight pair is consistent with the recording inside this box and date")
     pairs = res.drop_duplicates(["icao1", "icao2"]).reset_index(drop=True)
@@ -113,7 +116,7 @@ def locate(path, date, bbox, spacing, log):
     log(f"refining around {row.lat:.5f}, {row.lon:.5f}")
     # shortcut: no --extra flyovers; auto-detected extras included junk fits and moved Oyster Bay
     # from 460 m to 660 m off. Upgrade by filtering extras (edge-of-grid fits, reused flights) first.
-    fine = pipeline.refine(sp, e1, e2, segs, row, elevation=elev)
+    fine = pipeline.refine(sp, e1, e2, segs, row, elevation=elev, f0_tol=0.15)
     b = fine.iloc[0]
     near = fine[fine.score >= 0.95 * b.score]
     m_per_deg = 111320.0
